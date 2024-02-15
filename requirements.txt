@@ -10,3 +10,6 @@ configparser
 picamera2==0.3.9
 RPi.GPIO
 pre-commit
+stomp.py
+
+

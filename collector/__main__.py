@@ -5,14 +5,16 @@ and send it to the InfluxDB database.
 
 Should be run from the root of the project as: python3 -m collector
 """
-# TODO fix flake8 flags, done temporarily to commit
-# flake8: noqa
 import json
 import logging
 import os
 import signal
 import sys
 import traceback
+import stomp # for message broker
+import socket # for hostname retrieval
+import re # to split the hostname in letters and numbers
+
 from sys import argv
 from threading import Thread
 from time import sleep
@@ -45,6 +47,7 @@ from collector.sensors.light_level import LightLevel
 from collector.sensors.mcp3008 import MCP3008
 from collector.sensors.moisture import Moisture
 from collector.sensors.ndvi import NDVI
+from collector.queue.subscriber import Subscriber
 
 # We need to use board instead of initializing the pins manually like 'Pin(12)'
 # because in this way we have a wrapper that works on every Raspberry Pi model
@@ -62,7 +65,11 @@ def main():
     """
     Initialize and starts the threads that will read the data from the sensors and send it to the database.
     The parameters of the sensors and assets are read from the configuration file as specified in the README.
+    Plus, an extra thread will be used for the Message Broker.
     """
+    thread = Thread(target=__wait_message)
+    thread.start()
+
     utils.setup_logging()
     utils.create_stop_script()
 
@@ -72,6 +79,49 @@ def main():
     logging.info("Threads started")
 
     sync_config_file(asset_list)
+
+
+def load_env_file(env_file_path=".env"):
+    try:
+        with open(env_file_path, "r") as file:
+            for line in file:
+                # Ignore lines that are empty or start with '#'
+                if not line.strip() or line.startswith("#"):
+                    continue
+
+                # Split the line at the first '=' character
+                key, value = line.strip().split("=", 1)
+
+                # Set the environment variable
+                os.environ[key] = value
+
+    except FileNotFoundError:
+        print(f"{env_file_path} not found. Make sure to create a .env file with your environment variables.")
+
+
+def __wait_message():
+    """
+    Wait for a message from the broker
+    """
+    load_env_file()
+    url = os.getenv("URL")
+    username = os.getenv("USER")
+    password = os.getenv("PASS")
+
+    # Get hostname for the queue
+    hostname = socket.gethostname()
+    r = re.compile("([a-zA-Z]+)([0-9]+)")
+    m = r.match(hostname)
+    # Match the tuple <T.i.A>
+    queue_destination = m.group(1) + "." + m.group(2) + ".config.change"
+
+    conn = stomp.Connection(host_and_ports=[(url, 61613)])
+    conn.set_listener('', Subscriber(conn, conf, CONFIG_PATH))
+    conn.connect(username, password, wait=True)
+    conn.subscribe(destination=queue_destination, id=1, ack='auto')
+
+    while 1:
+        sleep(10)
 
 
 def signal_handler(signal, frame):
@@ -93,8 +143,7 @@ def sync_config_file(thread_list: List[Tuple[Asset, Thread]]):
             print("Config file changed, restarting threads...")
             logging.info("Config file changed, restarting threads...")
             last_edited = newLastEdited
-            del mcp3008
-            mcp3008 = MCP3008()
+
             for asset, thread in thread_list:
                 asset.stop_thread()
                 thread.join()

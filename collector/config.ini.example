@@ -1,6 +1,6 @@
 [influx2]
 url=http://169.254.48.238:8086
-org=sirius_local
+org=myOrg
 token=C2MP4iqlZ5j6VFCxx1ax9JzXd-8rB7LWCQJHH2Y9xkMRg9_K9hcRQd9VhDam03Wj1Q5hpvwYHtbcnPaBpLuwfA==
 
 [pots]
